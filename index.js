@@ -21,7 +21,7 @@ const conversationHistory = {};
 const extractedContent = {};
 
 // URLs for relevant pages like FAQs, company policies, etc.
-const urlsToExtract = [{ name: "FAQ", url: "https://nimc.gov.ng/faqs/" }];
+const urlsToExtract = [{ name: "FAQ", url: "https://sai-ren-ai-frontend.vercel.app/about-us" }];
 
 // Helper function to clean and format the extracted text
 const cleanText = (text) => {
