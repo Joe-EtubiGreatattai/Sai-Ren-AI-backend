@@ -2,6 +2,7 @@ const express = require("express");
 const cors = require("cors");
 const axios = require("axios");
 const cheerio = require("cheerio");
+const puppeteer = require("puppeteer");
 const OpenAI = require("openai");
 
 require("dotenv").config();
@@ -21,7 +22,9 @@ const conversationHistory = {};
 const extractedContent = {};
 
 // URLs for relevant pages like FAQs, company policies, etc.
-const urlsToExtract = [{ name: "FAQ", url: "https://sai-ren-ai-frontend.vercel.app/about-us" }];
+const urlsToExtract = [
+  { name: "FAQ", url: "https://sai-ren-ai-frontend.vercel.app/about-us" },
+];
 
 // Helper function to clean and format the extracted text
 const cleanText = (text) => {
@@ -31,15 +34,27 @@ const cleanText = (text) => {
     .trim();
 };
 
-// Fetch and extract text content from a URL
+// Fetch and extract text content from a URL using Puppeteer to handle JavaScript
 async function extractTextFromURL(url) {
   try {
-    const { data } = await axios.get(url);
-    const $ = cheerio.load(data);
-    const extractedText = $("body").text();
+    const browser = await puppeteer.launch();
+    const page = await browser.newPage();
+
+    // Set the user agent to avoid bot detection
+    await page.setUserAgent(
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+    );
+
+    await page.goto(url, { waitUntil: "networkidle2" }); // Wait for the page to finish loading
+
+    // Extract the rendered content
+    const extractedText = await page.evaluate(() => document.body.innerText);
+
+    await browser.close();
+
     return cleanText(extractedText);
   } catch (error) {
-    console.error("Error fetching or extracting text:", error);
+    console.error("Error fetching or extracting text with Puppeteer:", error);
     return null;
   }
 }
@@ -74,7 +89,7 @@ async function generateAIContent(prompt) {
 
 // Function to extract main search query using AI
 async function extractSearchQuery(userInput) {
-  const prompt = `Extract the main search query from the following user input. Return only the extracted query, nothing else: "${userInput}"`;
+  const prompt = `Extract the main search query from the user is looking for.make sure the query is contextually correct and relevant to the user's search (preferablly the single text). Return only the extracted query, nothing else: "${userInput}"`;
   return await generateAIContent(prompt);
 }
 
@@ -167,17 +182,15 @@ async function handleSearch(query) {
   const extractedQuery = await extractSearchQuery(query);
   console.log("Extracted search query:", extractedQuery);
 
-  // Construct the API URL for searching phones
+  // Construct the API URL for searching products
   const apiUrl = `https://dummyjson.com/products/search?q=${encodeURIComponent(
     extractedQuery
   )}`;
-
   console.log("API URL:", apiUrl);
 
   try {
     // Fetch data from the API
     const response = await axios.get(apiUrl);
-
     console.log("API response received", response.data);
 
     if (response.status !== 200) {
@@ -214,68 +227,81 @@ async function handleSearch(query) {
         product.shippingInformation || "Standard shipping applies",
     }));
 
-    // Generate a summary based on the first result (if any)
-    let summary = "";
-    if (processedResults.length > 0) {
-      const firstResult = processedResults[0];
-      summary = `Top result: ${firstResult.title} ($${firstResult.price}) - ${firstResult.description}`;
+    // Generate a recommendation based on multiple criteria (rating, price, stock)
+    let bestProduct = null;
+    let highestScore = -Infinity; // Track the best score to recommend the product
+
+    processedResults.forEach((product) => {
+      let score = 0;
+
+      // Scoring criteria (custom logic):
+      // Higher rating = higher score
+      score += product.rating * 2;
+
+      // Lower price = higher score
+      score += (1 / product.price) * 10;
+
+      // Products with stock get a small bonus
+      if (product.stock > 0) {
+        score += 1;
+      }
+
+      // Find the best product based on the score
+      if (score > highestScore) {
+        highestScore = score;
+        bestProduct = product;
+      }
+    });
+
+    // If a best product is found, recommend it
+    let recommendation = "";
+    if (bestProduct) {
+      recommendation = `We recommend: ${bestProduct.title} ($${bestProduct.price}) with a rating of ${bestProduct.rating} and ${bestProduct.stock} in stock.`;
     } else {
-      summary = "No relevant products found.";
+      recommendation =
+        "No suitable product recommendation could be made based on the current search.";
     }
 
-    console.log("Processed results:", processedResults);
-    console.log("Summary:", summary);
-
-    return { reply: summary, results: processedResults };
+    return { reply: recommendation, results: processedResults };
   } catch (error) {
     console.error("Error fetching data:", error);
-    return { error: "Failed to retrieve search results" };
+    return { error: "Failed to fetch search results" };
   }
 }
 
 async function handleCheckOrder(input, userId) {
-  console.log("handleCheckOrder function called");
+  // Construct a prompt to extract the order ID
+  const prompt = `Extract order ID from the following input: "${input}" if you cant find the order id then respond with nothing`;
+  const orderId = await generateAIContent(prompt);
 
-  // Use OpenAI to extract the order ID
-  const extractionPrompt = `Extract the order ID from the following text. If there's no clear order ID, respond with "NO_ORDER_ID_FOUND". Text: "${input}"`;
-  
-  try {
-    const extraction = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      messages: [{ role: "user", content: extractionPrompt }],
-    });
-
-    const extractedOrderId = extraction.choices[0].message.content.trim();
-
-    if (extractedOrderId === "NO_ORDER_ID_FOUND") {
-      return {
-        orderId: null,
-        reply: "I couldn't find an order ID in your message. Please provide a valid order ID to check its status."
-      };
-    }
-
-    // This is a placeholder. In a real application, you would query your order database or API.
-    const orderStatus = "In progress";
-    console.log(`Order status for ${extractedOrderId} set to: ${orderStatus}`);
-
-    return {
-      orderId: extractedOrderId,
-      reply: `The status of your order ${extractedOrderId} is: ${orderStatus}`
-    };
-  } catch (error) {
-    console.error("Error in handleCheckOrder:", error);
+  // Check if an order ID was extracted
+  if (!orderId || orderId.trim() === "") {
     return {
       orderId: null,
-      reply: "I'm sorry, but I encountered an error while processing your order status request. Please try again later or contact customer support."
+      reply: "Please provide a valid order ID to check the status.",
     };
   }
+
+  // Generate random order statuses dynamically
+  const orderStatuses = [
+    "Processing",
+    "Shipped",
+    "Delivered",
+    "Cancelled",
+    "On Hold",
+  ];
+  const randomStatus =
+    orderStatuses[Math.floor(Math.random() * orderStatuses.length)];
+
+  // Return the order ID and a dynamic status message
+  return {
+    orderId,
+    reply: `Order ID: ${orderId} is currently: ${randomStatus}.`,
+  };
 }
 
-// Start the server and load content on startup
+// Start the server and load the initial content
 app.listen(PORT, async () => {
-  console.log(`AI Agent Server is running on http://localhost:${PORT}`);
-
-  // Load content from URLs
-  await loadContent();
-  console.log("Finished loading content from URLs.");
+  console.log(`Server running on port ${PORT}`);
+  await loadContent(); // Load and extract content from URLs on startup
 });
