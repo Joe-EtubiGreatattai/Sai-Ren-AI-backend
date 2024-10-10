@@ -141,6 +141,38 @@ app.post("/ai-agent", async (req, res) => {
     res.status(500).json({ error: "Internal server error" });
   }
 });
+// Add a new endpoint to get cart items
+app.get("/get-cart", async (req, res) => {
+  try {
+    // Simulating cart items. Replace this with actual data fetch if needed.
+    const cartItems = [
+      {
+        id: 1,
+        title: "Product 1",
+        price: 29.99,
+        quantity: 2,
+      },
+      {
+        id: 2,
+        title: "Product 2",
+        price: 49.99,
+        quantity: 1,
+      },
+      {
+        id: 3,
+        title: "Product 3",
+        price: 19.99,
+        quantity: 3,
+      },
+    ];
+
+    // Return the cart items
+    res.status(200).json(cartItems);
+  } catch (error) {
+    console.error("Error fetching cart items:", error);
+    res.status(500).json({ error: "Failed to fetch cart items" });
+  }
+});
 
 async function handleChat(message, userId) {
   console.log("handleChat function called");
@@ -159,7 +191,7 @@ async function handleChat(message, userId) {
     {
       role: "system",
       content:
-        "You are Sai Ren AI. Provide helpful, concise responses without special characters. Use simple language and keep answers brief.",
+        "You are Sia-ren AI. Provide helpful, concise responses without special characters. Use simple language and keep answers brief.",
     },
     ...conversationHistory[userId],
     {
